@@ -1,9 +1,11 @@
+import React from "react";
 import HeartRateChart from "./HeartRateChart";
 import "./HeartRateChart.css";
+import "./App.css";
 
 function App() {
   return (
-    <div style={{ background: "#f7f7f7", minHeight: "100vh", paddingTop: "40px" }}>
+    <div className="app-wrapper">
       <HeartRateChart />
     </div>
   );
