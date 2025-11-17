@@ -14,27 +14,55 @@ ChartJS.register(LineElement, CategoryScale, LinearScale, PointElement, Tooltip)
 export default function HeartRateChart() {
   const chartRef = useRef();
   const containerRef = useRef();
+
   const [tooltip, setTooltip] = useState(null);
   const [activeTab, setActiveTab] = useState("Day");
 
-  // ------------------------------
-  // DATA
-  // ------------------------------
+  const [dayIndex, setDayIndex] = useState(0);
+
+  const dayDates = [
+    "2025/10/21",
+    "2025/10/22",
+    "2025/10/23",
+  ];
+
+  const daySeries = [
+    [
+      96, 94, 93, 95, 97, 102, 110, 118, 123, 129, 131, 128,
+      126, 124, 121, 120, 119, 121, 125, 131, 129, 119, 111, 103
+    ],
+    [
+      97, 95, 94, 93, 96, 103, 111, 117, 124, 130, 133, 129,
+      128, 126, 122, 119, 118, 119, 123, 128, 127, 118, 109, 101
+    ],
+    [
+      98, 96, 94, 93, 95, 100, 108, 115, 122, 128, 132, 130,
+      127, 125, 123, 121, 118, 120, 124, 130, 128, 118, 110, 102
+    ]
+  ];
 
   const labelsDay = Array.from({ length: 24 }, (_, i) => `${i}:00`);
-  const dataDay = [
-    98, 96, 94, 93, 95, 100, 108, 115, 122, 128, 132, 130,
-    127, 125, 123, 121, 118, 120, 124, 130, 128, 118, 110, 102
-  ];
+  const dataDay = daySeries[dayIndex];
+
+  // -----------------------------------
+  // WEEK
+  // -----------------------------------
 
   const labelsWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const dataWeek = [112, 115, 118, 135, 122, 118, 120];
 
+  // -----------------------------------
+  // MONTH (fixed, stable)
+  // -----------------------------------
   const labelsMonth = Array.from({ length: 30 }, (_, i) => `${i + 1}`);
+
   const dataMonthRef = useRef(
     Array.from({ length: 30 }, () => 110 + Math.floor(Math.random() * 25))
   );
 
+  // ------------------------------------------------
+  // Select active dataset
+  // ------------------------------------------------
   let labels, values;
 
   if (activeTab === "Day") {
@@ -48,9 +76,9 @@ export default function HeartRateChart() {
     values = dataMonthRef.current;
   }
 
-  // ------------------------------
-  // CHART CONFIG
-  // ------------------------------
+  // ------------------------------------------------
+  // Chart data format
+  // ------------------------------------------------
 
   const data = {
     labels,
@@ -70,12 +98,10 @@ export default function HeartRateChart() {
   const options = {
     animation: false,
     hover: { animation: false },
-
     plugins: {
       legend: { display: false },
       tooltip: { enabled: false },
     },
-
     scales: {
       y: { min: 80, max: 160, ticks: { stepSize: 10 } },
       x: { grid: { display: false } },
@@ -86,13 +112,10 @@ export default function HeartRateChart() {
       if (!chart) return;
 
       const { offsetX } = event.native;
-
       const xScale = chart.scales.x;
       const yScale = chart.scales.y;
 
-      // ------------------------------
-      // WEEK / MONTH → 原逻辑; 不能动
-      // ------------------------------
+
       if (activeTab !== "Day") {
         const points = chart.getElementsAtEventForMode(
           event,
@@ -118,7 +141,7 @@ export default function HeartRateChart() {
       }
 
       // ------------------------------
-      // DAY → 自由 hover （关键修复）
+      // DAY — free hover (HH:MM interpolation)
       // ------------------------------
       const chartLeft = xScale.left;
       const chartRight = xScale.right;
@@ -128,19 +151,17 @@ export default function HeartRateChart() {
         return;
       }
 
-      // 将像素映射到 0 - 23 的小时数
       const hourFloat =
         ((offsetX - chartLeft) / (chartRight - chartLeft)) * 23;
 
       const h = Math.floor(hourFloat);
-      const t = hourFloat - h; // 小数（0-1）
+      const t = hourFloat - h;
 
-      // 对心率做简单线性插值
       const v1 = values[h];
       const v2 = values[Math.min(h + 1, 23)];
+
       const v = Math.round(v1 * (1 - t) + v2 * t);
 
-      // 时间格式 HH:MM
       const mm = Math.round(t * 60)
         .toString()
         .padStart(2, "0");
@@ -153,8 +174,15 @@ export default function HeartRateChart() {
     },
   };
 
-  // 鼠标离开 chart 时隐藏 tooltip
   const handleLeave = () => setTooltip(null);
+
+  const goPrev = () => {
+    setDayIndex((prev) => Math.max(0, prev - 1));
+  };
+
+  const goNext = () => {
+    setDayIndex((prev) => Math.min(daySeries.length - 1, prev + 1));
+  };
 
   return (
     <div className="page-wrapper">
@@ -162,6 +190,7 @@ export default function HeartRateChart() {
 
         <h2>Heart Rate</h2>
 
+        {/* tabs */}
         <div className="tab-group">
           {["Day", "Week", "Month"].map((tab) => (
             <button
@@ -174,13 +203,55 @@ export default function HeartRateChart() {
           ))}
         </div>
 
-        <div className="date-tag">
-          {activeTab === "Day"
-            ? "2025/10/23"
-            : activeTab === "Week"
-            ? "2025/10/17 - 2025/10/23"
-            : "October"}
-        </div>
+        {/* date bar & navigation */}
+        {activeTab === "Day" ? (
+          <div
+            className="date-tag"
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
+            <button
+              onClick={goPrev}
+              disabled={dayIndex === 0}
+              style={{
+                padding: "4px 10px",
+                background: "#ffeff3",
+                borderRadius: "6px",
+                border: "1px solid #ffc0d0",
+                cursor: dayIndex === 0 ? "default" : "pointer",
+              }}
+            >
+              ←
+            </button>
+
+            <div style={{ fontWeight: 500 }}>{dayDates[dayIndex]}</div>
+
+            <button
+              onClick={goNext}
+              disabled={dayIndex === daySeries.length - 1}
+              style={{
+                padding: "4px 10px",
+                background: "#ffeff3",
+                borderRadius: "6px",
+                border: "1px solid #ffc0d0",
+                cursor:
+                  dayIndex === daySeries.length - 1 ? "default" : "pointer",
+              }}
+            >
+              →
+            </button>
+          </div>
+        ) : (
+          <div className="date-tag">
+            {activeTab === "Week"
+              ? "2025/10/17 - 2025/10/23"
+              : "October"}
+          </div>
+        )}
 
         <div
           ref={containerRef}
