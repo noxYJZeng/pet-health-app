@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Line } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -17,14 +17,11 @@ export default function HeartRateChart() {
 
   const [tooltip, setTooltip] = useState(null);
   const [activeTab, setActiveTab] = useState("Day");
+  const [testData, setTestData] = useState(null);
 
   const [dayIndex, setDayIndex] = useState(0);
 
-  const dayDates = [
-    "2025/10/21",
-    "2025/10/22",
-    "2025/10/23",
-  ];
+  const dayDates = ["2025/10/21", "2025/10/22", "2025/10/23"];
 
   const daySeries = [
     [
@@ -41,27 +38,51 @@ export default function HeartRateChart() {
     ]
   ];
 
+  // -----------------------------------
+  // DAY
+  // -----------------------------------
   const labelsDay = Array.from({ length: 24 }, (_, i) => `${i}:00`);
   const dataDay = daySeries[dayIndex];
 
   // -----------------------------------
   // WEEK
   // -----------------------------------
-
   const labelsWeek = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const dataWeek = [112, 115, 118, 135, 122, 118, 120];
 
   // -----------------------------------
-  // MONTH (fixed, stable)
+  // MONTH
   // -----------------------------------
   const labelsMonth = Array.from({ length: 30 }, (_, i) => `${i + 1}`);
-
   const dataMonthRef = useRef(
     Array.from({ length: 30 }, () => 110 + Math.floor(Math.random() * 25))
   );
 
+  // -----------------------------------
+  // TEST - CSV
+  // -----------------------------------
+  useEffect(() => {
+    fetch("/heart-rates.csv")
+      .then((res) => res.text())
+      .then((text) => {
+        const rows = text.trim().split("\n").slice(1);
+        const parsed = rows.map((line) => {
+          const [t, hr] = line.split(",");
+          return {
+            t: parseFloat(t),
+            hr: parseFloat(hr),
+          };
+        });
+
+        // 去掉心率=0
+        const filtered = parsed.filter((d) => !isNaN(d.hr) && d.hr > 0);
+        setTestData(filtered);
+      })
+      .catch((err) => console.error("Error loading CSV:", err));
+  }, []);
+
   // ------------------------------------------------
-  // Select active dataset
+  // SELECT ACTIVE DATA
   // ------------------------------------------------
   let labels, values;
 
@@ -71,14 +92,28 @@ export default function HeartRateChart() {
   } else if (activeTab === "Week") {
     labels = labelsWeek;
     values = dataWeek;
-  } else {
+  } else if (activeTab === "Month") {
     labels = labelsMonth;
     values = dataMonthRef.current;
+  } else if (activeTab === "Test" && testData) {
+    labels = testData.map((d) => d.t.toFixed(1) + "s");
+    values = testData.map((d) => d.hr);
+  } else {
+    labels = [];
+    values = [];
   }
 
-  // ------------------------------------------------
-  // Chart data format
-  // ------------------------------------------------
+
+  let yMin = 80;
+  let yMax = 160;
+
+  if (activeTab === "Test" && values.length > 0) {
+    const minV = Math.min(...values);
+    const maxV = Math.max(...values);
+    yMin = Math.max(0, Math.floor(minV - 10));
+    yMax = Math.ceil(maxV + 10);
+  }
+
 
   const data = {
     labels,
@@ -95,6 +130,7 @@ export default function HeartRateChart() {
     ],
   };
 
+
   const options = {
     animation: false,
     hover: { animation: false },
@@ -102,11 +138,13 @@ export default function HeartRateChart() {
       legend: { display: false },
       tooltip: { enabled: false },
     },
+
     scales: {
-      y: { min: 80, max: 160, ticks: { stepSize: 10 } },
+      y: { min: yMin, max: yMax, ticks: { stepSize: 10 } },
       x: { grid: { display: false } },
     },
 
+    // Hover logic
     onHover: (event) => {
       const chart = chartRef.current;
       if (!chart) return;
@@ -115,59 +153,54 @@ export default function HeartRateChart() {
       const xScale = chart.scales.x;
       const yScale = chart.scales.y;
 
+      // DAY: Free hover
+      if (activeTab === "Day") {
+        const chartLeft = xScale.left;
+        const chartRight = xScale.right;
 
-      if (activeTab !== "Day") {
-        const points = chart.getElementsAtEventForMode(
-          event,
-          "nearest",
-          { intersect: false },
-          false
-        );
-
-        if (!points.length) {
+        if (offsetX < chartLeft || offsetX > chartRight) {
           setTooltip(null);
           return;
         }
 
-        const index = points[0].index;
-        const v = values[index];
-        const label = labels[index];
+        const hourFloat =
+          ((offsetX - chartLeft) / (chartRight - chartLeft)) * 23;
 
-        const px = xScale.getPixelForValue(index);
+        const h = Math.floor(hourFloat);
+        const t = hourFloat - h;
+
+        const v1 = values[h];
+        const v2 = values[Math.min(h + 1, 23)];
+        const v = Math.round(v1 * (1 - t) + v2 * t);
+
+        const mm = Math.round(t * 60)
+          .toString()
+          .padStart(2, "0");
+        const label = `${h}:${mm}`;
+
+        const px = offsetX;
         const py = yScale.getPixelForValue(v);
 
         setTooltip({ x: px, y: py, value: v, label });
         return;
       }
 
-      // ------------------------------
-      // DAY — free hover (HH:MM interpolation)
-      // ------------------------------
-      const chartLeft = xScale.left;
-      const chartRight = xScale.right;
-
-      if (offsetX < chartLeft || offsetX > chartRight) {
+      // WEEK / MONTH / TEST
+      const points = chart.getElementsAtEventForMode(
+        event,
+        "nearest",
+        { intersect: false },
+        false
+      );
+      if (!points.length) {
         setTooltip(null);
         return;
       }
 
-      const hourFloat =
-        ((offsetX - chartLeft) / (chartRight - chartLeft)) * 23;
-
-      const h = Math.floor(hourFloat);
-      const t = hourFloat - h;
-
-      const v1 = values[h];
-      const v2 = values[Math.min(h + 1, 23)];
-
-      const v = Math.round(v1 * (1 - t) + v2 * t);
-
-      const mm = Math.round(t * 60)
-        .toString()
-        .padStart(2, "0");
-      const label = `${h}:${mm}`;
-
-      const px = offsetX;
+      const index = points[0].index;
+      const v = values[index];
+      const label = labels[index];
+      const px = xScale.getPixelForValue(index);
       const py = yScale.getPixelForValue(v);
 
       setTooltip({ x: px, y: py, value: v, label });
@@ -176,23 +209,20 @@ export default function HeartRateChart() {
 
   const handleLeave = () => setTooltip(null);
 
-  const goPrev = () => {
-    setDayIndex((prev) => Math.max(0, prev - 1));
-  };
+  const goPrev = () => setDayIndex((prev) => Math.max(0, prev - 1));
+  const goNext = () => setDayIndex((prev) => Math.min(daySeries.length - 1, prev + 1));
 
-  const goNext = () => {
-    setDayIndex((prev) => Math.min(daySeries.length - 1, prev + 1));
-  };
-
+  // ------------------------------------------------
+  // RENDER
+  // ------------------------------------------------
   return (
     <div className="page-wrapper">
       <div className="chart-container">
-
         <h2>Heart Rate</h2>
 
         {/* tabs */}
         <div className="tab-group">
-          {["Day", "Week", "Month"].map((tab) => (
+          {["Day", "Week", "Month", "Test"].map((tab) => (
             <button
               key={tab}
               className={`tab-btn ${activeTab === tab ? "active" : ""}`}
@@ -203,61 +233,24 @@ export default function HeartRateChart() {
           ))}
         </div>
 
-        {/* date bar & navigation */}
+        {/* Dates */}
         {activeTab === "Day" ? (
-          <div
-            className="date-tag"
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              gap: "12px",
-            }}
-          >
-            <button
-              onClick={goPrev}
-              disabled={dayIndex === 0}
-              style={{
-                padding: "4px 10px",
-                background: "#ffeff3",
-                borderRadius: "6px",
-                border: "1px solid #ffc0d0",
-                cursor: dayIndex === 0 ? "default" : "pointer",
-              }}
-            >
-              ←
-            </button>
-
+          <div className="date-tag" style={{ display: "flex", justifyContent: "center", gap: "12px" }}>
+            <button onClick={goPrev} disabled={dayIndex === 0}>←</button>
             <div style={{ fontWeight: 500 }}>{dayDates[dayIndex]}</div>
-
-            <button
-              onClick={goNext}
-              disabled={dayIndex === daySeries.length - 1}
-              style={{
-                padding: "4px 10px",
-                background: "#ffeff3",
-                borderRadius: "6px",
-                border: "1px solid #ffc0d0",
-                cursor:
-                  dayIndex === daySeries.length - 1 ? "default" : "pointer",
-              }}
-            >
-              →
-            </button>
+            <button onClick={goNext} disabled={dayIndex === daySeries.length - 1}>→</button>
+          </div>
+        ) : activeTab === "Test" ? (
+          <div className="date-tag" style={{ textAlign: "center", color: "#ff6c84", fontWeight: 500 }}>
+            Test Dataset (seconds vs heart rate)
           </div>
         ) : (
           <div className="date-tag">
-            {activeTab === "Week"
-              ? "2025/10/17 - 2025/10/23"
-              : "October"}
+            {activeTab === "Week" ? "2025/10/17 - 2025/10/23" : "October"}
           </div>
         )}
 
-        <div
-          ref={containerRef}
-          style={{ position: "relative" }}
-          onMouseLeave={handleLeave}
-        >
+        <div ref={containerRef} style={{ position: "relative" }} onMouseLeave={handleLeave}>
           <Line ref={chartRef} data={data} options={options} />
 
           {tooltip && (
@@ -273,8 +266,8 @@ export default function HeartRateChart() {
                 color: "white",
                 borderRadius: "6px",
                 fontSize: "13px",
-                whiteSpace: "nowrap",
                 pointerEvents: "none",
+                whiteSpace: "nowrap",
               }}
             >
               {tooltip.label} ❤️ {tooltip.value}
